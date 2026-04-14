@@ -32,7 +32,7 @@ jobs:
   build-gki:
     name: "${{ inputs.kernel_version }}${{ inputs.variant && format('-{0}', inputs.variant) || '' }}"
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120 # Erhöht, da Full-Clones länger dauern können
 
     steps:
     - name: Checkout Repository
@@ -41,95 +41,56 @@ jobs:
     - name: Parse kernel version
       id: parse
       run: |
-        # Parse version string. 
-        # Format: [KERNEL_VERSION].[SUBLEVEL]-[ANDROID_VERSION]-[PATCH_LEVEL]
-        # Example 1: 5.10.198-android12-2024-01 -> K=5.10, S=198, A=android12, P=2024-01
-        # Example 2: 5.10.X-android12-lts       -> K=5.10, S=X,   A=android12, P=lts
-        
         INPUT_VERSION="${{ inputs.kernel_version }}"
-        
-        # Split by hyphens
         IFS='-' read -r KERNEL_PART ANDROID_PART REST <<< "$INPUT_VERSION"
-        
-        # Extract Kernel Version and Sublevel
         KERNEL_VERSION="${KERNEL_PART%.*}"
         SUB_LEVEL="${KERNEL_PART##*.}"
-        
-        # Extract Android Version
         ANDROID_VERSION="$ANDROID_PART"
-        
-        # Everything after the android version is the patch level
         OS_PATCH_LEVEL="$REST"
-  
-        echo "Parsed: KERNEL=$KERNEL_VERSION, SUB=$SUB_LEVEL, ANDROID=$ANDROID_VERSION, PATCH=$OS_PATCH_LEVEL"
         
-        # Set environment variables for subsequent steps and shell scripts
         echo "ANDROID_VERSION=$ANDROID_VERSION" >> "$GITHUB_ENV"
         echo "KERNEL_VERSION=$KERNEL_VERSION" >> "$GITHUB_ENV"
         echo "SUB_LEVEL=$SUB_LEVEL" >> "$GITHUB_ENV"
         echo "OS_PATCH_LEVEL=$OS_PATCH_LEVEL" >> "$GITHUB_ENV"
-
-        # Set step outputs for immediate YAML context access (avoids validation warnings)
         echo "android_version=$ANDROID_VERSION" >> $GITHUB_OUTPUT
         echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
         echo "sub_level=$SUB_LEVEL" >> $GITHUB_OUTPUT
         echo "os_patch_level=$OS_PATCH_LEVEL" >> $GITHUB_OUTPUT
 
     - name: Free Disk Space
-      if: true
-      uses: endersonmenezes/free-disk-space@v3  # Use @main for latest, @v3 for stable
+      uses: endersonmenezes/free-disk-space@v3
       with:
         remove_android: true
         remove_dotnet: true
-        remove_haskell: true
         remove_tool_cache: true
-        remove_swap: true
         remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
-        remove_packages_one_command: true
-        remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle"
-        rm_cmd: "rmz"  # Use 'rmz' for faster deletion (default: 'rm')
-        rmz_version: "3.1.1"  # Required when rm_cmd is 'rmz'
-        testing: false
 
     - name: Setup Build Environment
       run: |
         mkdir -p "$GITHUB_WORKSPACE/kernel"
-        mkdir -p "$GITHUB_WORKSPACE/git-repo"
-        curl -L https://storage.googleapis.com/git-repo-downloads/repo -o "$GITHUB_WORKSPACE/git-repo/repo"
-        chmod +x "$GITHUB_WORKSPACE/git-repo/repo"
-        echo "$GITHUB_WORKSPACE/git-repo" >> "$GITHUB_PATH"
-        
-        # Clone patches if commit is provided
+        # Patches & AnyKernel3 Clones (wie gehabt)
+        git clone https://github.com/WildKernels/kernel_patches.git "$GITHUB_WORKSPACE/kernel_patches"
         if [ -n "${{ inputs.patches_commit }}" ]; then
-          echo "Cloning Kernel Patches at commit ${{ inputs.patches_commit }}"
-          if [ -d "$GITHUB_WORKSPACE/kernel_patches" ]; then rm -rf "$GITHUB_WORKSPACE/kernel_patches"; fi
-          git clone https://github.com/WildKernels/kernel_patches.git "$GITHUB_WORKSPACE/kernel_patches"
-          cd "$GITHUB_WORKSPACE/kernel_patches"
-          git checkout "${{ inputs.patches_commit }}"
-          cd "$GITHUB_WORKSPACE"
-        else
-          git clone https://github.com/WildKernels/kernel_patches.git "$GITHUB_WORKSPACE/kernel_patches"
+          cd "$GITHUB_WORKSPACE/kernel_patches" && git checkout "${{ inputs.patches_commit }}" && cd "$GITHUB_WORKSPACE"
         fi
-
-        # Use specific commit if provided
+        
+        git clone https://github.com/WildKernels/AnyKernel3.git -b gki-2.0 "$GITHUB_WORKSPACE/AnyKernel3"
         if [ -n "${{ inputs.anykernel_commit }}" ]; then
-          echo "Cloning AnyKernel3 at commit ${{ inputs.anykernel_commit }}"
-          if [ -d "$GITHUB_WORKSPACE/AnyKernel3" ]; then rm -rf "$GITHUB_WORKSPACE/AnyKernel3"; fi
-          git clone https://github.com/WildKernels/AnyKernel3.git "$GITHUB_WORKSPACE/AnyKernel3"
-          cd "$GITHUB_WORKSPACE/AnyKernel3"
-          git checkout "${{ inputs.anykernel_commit }}"
-          cd "$GITHUB_WORKSPACE"
-        elif [ ! -d "$GITHUB_WORKSPACE/AnyKernel3" ]; then
-           # Fallback if not downloaded
-           git clone https://github.com/WildKernels/AnyKernel3.git -b gki-2.0 "$GITHUB_WORKSPACE/AnyKernel3"
+          cd "$GITHUB_WORKSPACE/AnyKernel3" && git checkout "${{ inputs.anykernel_commit }}" && cd "$GITHUB_WORKSPACE"
         fi
 
     - name: Download Kernel Repository
-      uses: ./.github/actions/download-kernel
-      with:
-        android_version: ${{ steps.parse.outputs.android_version }}
-        kernel_version: ${{ steps.parse.outputs.kernel_version }}
-        os_patch_level: ${{ steps.parse.outputs.os_patch_level }}
+      run: |
+        cd "$GITHUB_WORKSPACE/kernel"
+        # Wir checken direkt den OnePlus SM8750 Tree aus
+        # Wir klonen in den Unterordner 'common', da dein Build-Script später dort Makefile/Files erwartet
+        if [[ "${{ steps.parse.outputs.kernel_version }}" == "6.6" ]]; then
+          echo "Cloning OnePlus SM8750 Kernel Tree (6.6)..."
+          git clone --depth=1 https://github.com/einargednochsson/kernel_oneplus_sm8750.git common
+        else
+          echo "Error: Dieses Script ist aktuell auf den 6.6 SM8750 Tree optimiert."
+          exit 1
+        fi
 
     - name: Extract Sublevel and Set File Name
       id: extract
@@ -139,12 +100,9 @@ jobs:
           EXTRACTED=$(grep '^SUBLEVEL = ' "$GITHUB_WORKSPACE/kernel/common/Makefile" | awk '{print $3}')
           [[ -n "$EXTRACTED" ]] && SUBLEVEL="$EXTRACTED"
         fi
-
         FILE_NAME="$KERNEL_VERSION.$SUBLEVEL-$ANDROID_VERSION-$OS_PATCH_LEVEL${{ inputs.variant && format('-{0}', inputs.variant) || '' }}"
         echo "SUBLEVEL=$SUBLEVEL" >> $GITHUB_ENV
         echo "FILE_NAME=$FILE_NAME" >> $GITHUB_ENV
-        
-        # Set step outputs for parse-time YAML context access
         echo "file_name=$FILE_NAME" >> $GITHUB_OUTPUT
         echo "sublevel=$SUBLEVEL" >> $GITHUB_OUTPUT
 
