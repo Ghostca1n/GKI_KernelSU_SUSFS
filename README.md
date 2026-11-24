@@ -29,9 +29,39 @@ Generic kernels built on [Google's GKI sources](https://android.googlesource.com
 - **BPF** — BTF / eBPF / FUSE-BPF
 - **Performance** — incl. NTSync
 - **DroidSpaces** — container runtime
+- **Thermal & Power Efficiency (`android15-6.6` fork addition)** — KMI/ABI-safe idle wakeup reduction (`CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y`, lazy RCU enabled by default)
 
 > [!TIP]
 > Full documentation: [Wiki](https://github.com/WildKernels/GKI_KernelSU_SUSFS/wiki)
+
+---
+
+## Fork Customizations (`ampereforest` / `wild-trsy`)
+
+This fork adds a strictly **KMI/ABI-safe thermal and power-efficiency config fragment** scoped to **`android15-6.6`** (`6.6.x-android15`) builds, designed to cut unnecessary idle CPU wakeups and standby/light-use heat with **zero frequency capping and zero performance loss**.
+
+### What Was Added
+
+| Path | Purpose |
+| --- | --- |
+| [`.github/actions/thermal-efficiency/thermal-efficiency.fragment`](.github/actions/thermal-efficiency/thermal-efficiency.fragment) | Defines the two KMI-safe kernel config options appended to `wild_defconfig.fragment` |
+| [`.github/actions/thermal-efficiency/action.yml`](.github/actions/thermal-efficiency/action.yml) | Composite GitHub Action that applies the fragment only when `inputs.version == 'android15-6.6'` |
+| [`.github/workflows/build.yml`](.github/workflows/build.yml) | Invokes **Apply Thermal & Power Efficiency Configs** right after `Apply Device-Specific Patches` |
+
+### What Each Config Option Does
+
+| Config | Source Default Changed | What It Does |
+| --- | --- | --- |
+| `CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y` | `wq_power_efficient = true` (`kernel/workqueue.c`) | Allows workqueues flagged `WQ_POWER_EFFICIENT` to be scheduled as unbound work on an **already-awake CPU** instead of waking a deep-idle core. Reduces idle core wakeups and heat while leaving latency-critical bound workqueues and CPU max frequencies completely untouched. |
+| `# CONFIG_RCU_LAZY_DEFAULT_OFF is not set` | `enable_rcu_lazy = true` (`kernel/rcu/tree.c`) | Stock `android15-6.6` GKI already compiles in `CONFIG_RCU_LAZY=y` but leaves it disabled at boot (`CONFIG_RCU_LAZY_DEFAULT_OFF=y`). Clearing `DEFAULT_OFF` activates lazy RCU batching by default on offloaded `rcu_nocbs` CPUs, coalescing non-urgent `call_rcu()` callbacks to avoid frequent idle wakeups. Urgent/synchronous RCU paths (`call_rcu_hurry()`, `synchronize_rcu()`, memory reclaim flushes) remain immediate with no throughput or UI latency regression. |
+
+### KMI/ABI Safety & CI Verification
+
+- **Zero KMI/ABI drift:** Both options only change static `bool` initializers inside `.c` files — no struct layouts, headers, or exported symbols are altered.
+- **Verified in GitHub Actions:** Confirmed on `6.6.x-android15` (`wild-trsy`, `4k`, `KernelSU` + `SUSFS` + `DroidSpaces`, [Release `r24`](https://github.com/ampereforest/GKI_KernelSU_SUSFS/releases/tag/r24)):
+  - `ABI gate: OK - 9317 symbols compared against stock, 0 differ` (`6.6.118-android15-wild-trsy`)
+  - Built `.config` verified: `CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y` and `# CONFIG_RCU_LAZY_DEFAULT_OFF is not set`
+- **Runtime overrideable:** If ever needed for testing, `wq_power_efficient` can be toggled live via `/sys/module/workqueue/parameters/power_efficient` (or disabled at boot with `workqueue.power_efficient=N` / `rcutree.enable_rcu_lazy=N`).
 
 ---
 
