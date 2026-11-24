@@ -1,0 +1,20 @@
+name: 'Thermal & Power Efficiency Configs'
+description: 'Append KMI/ABI-safe thermal and power-efficiency config defaults for android15-6.6'
+
+inputs:
+  version:
+    description: 'Kernel config version (e.g., android15-6.6)'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Append KMI-safe thermal efficiency fragment (android15-6.6)
+      if: inputs.version == 'android15-6.6'
+      shell: bash
+      working-directory: ${{ github.workspace }}/kernel/common
+      run: |
+        set -euo pipefail
+        python3 "${{ github.workspace }}/.github/scripts/append_fragment.py" \
+          "${{ github.workspace }}/.github/actions/thermal-efficiency/thermal-efficiency.fragment" \
+          --dest wild_defconfig.fragment --label thermal-efficiency

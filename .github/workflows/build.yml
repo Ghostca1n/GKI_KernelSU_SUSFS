@@ -397,6 +397,11 @@ jobs:
           version: ${{ inputs.version }}
           kernel_version: ${{ inputs.kernel_version }}
 
+      - name: Apply Thermal & Power Efficiency Configs
+        uses: ./.github/actions/thermal-efficiency
+        with:
+          version: ${{ inputs.version }}
+
       - name: Integrate NoMount
         if: contains(inputs.feature_set, 'NoMount') || inputs.feature_set == 'All'
         uses: ./.github/actions/nomount

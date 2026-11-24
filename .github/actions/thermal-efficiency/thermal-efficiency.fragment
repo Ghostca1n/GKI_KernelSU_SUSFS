@@ -1,0 +1,13 @@
+# Strictly KMI/ABI-safe thermal & power-efficiency defaults for android15-6.6.
+#
+# Both options only toggle static bool initializers inside .c files (zero header
+# or struct layout changes, zero exported-symbol CRC drift, zero perf loss):
+#   - CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y (kernel/workqueue.c: wq_power_efficient)
+#     Schedules WQ_POWER_EFFICIENT workqueues onto already-awake CPUs instead of
+#     waking deep-idle cores.
+#   - # CONFIG_RCU_LAZY_DEFAULT_OFF is not set (kernel/rcu/tree.c: enable_rcu_lazy)
+#     Activates upstream GKI CONFIG_RCU_LAZY (already =y in stock gki_defconfig)
+#     by default on offloaded rcu_nocbs CPUs to batch non-urgent call_rcu()
+#     callbacks and reduce idle wakeups while keeping urgent/sync RCU immediate.
+CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+# CONFIG_RCU_LAZY_DEFAULT_OFF is not set
