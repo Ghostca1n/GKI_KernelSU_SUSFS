@@ -20,9 +20,12 @@ Generic kernels built on [Google's GKI sources](https://android.googlesource.com
 
 ## Features
 
+When **BakaSU** and **NoMount** are selected together, supported 5.10–6.12 builds use the pinned NoMount Suite kernel stack. The matching `00_NoMount-Module` activation ZIP is published as a separate artifact and release asset; install it only with the matching BakaSU kernel build. Other root variants, and BakaSU on kernel versions the Suite patch stack does not support, keep the existing NoMount integration.
+
 - **KernelSU / KernelSU-Next / BakaSU / FinaSU / Suki-SU Ultra / KowSU** — root implementations
 - **susfs4ksu** — root hiding (incl. Ptrace Leak Fix, Unicode Fix)
-- **NoMount / Mountify** — mount metamodules
+- **NoMount Suite (BakaSU)** — pinned in-kernel engine plus matching activation module for supported GKI 5.10–6.12 builds
+- **NoMount / Mountify** — existing metamodule path for other root variants and unsupported Suite kernel versions
 - **Baseband Guard** — partition protection
 - **Networking** — WireGuard, BBR, IPSet, CIFS
 - **TMPFS** — xattr / POSIX ACLs

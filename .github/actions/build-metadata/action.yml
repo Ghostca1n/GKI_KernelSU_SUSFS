@@ -13,6 +13,15 @@ inputs:
   nomount_commit:
     required: false
     default: ''
+  root_flavor:
+    required: false
+    default: ''
+  nomount_suite_commit:
+    required: false
+    default: ''
+  nomount_suite_version:
+    required: false
+    default: ''
   android_version:
     required: true
   kernel_version:
@@ -42,9 +51,26 @@ runs:
           NOMOUNT_ENABLED="true"
         fi
 
+        ROOT_FLAVOR="${{ inputs.root_flavor }}"
+        NOMOUNT_SUITE_ENABLED="false"
+        NOMOUNT_SUITE_VERSION="N/A"
+        NOMOUNT_SUITE_COMMIT="N/A"
+        NOMOUNT_SUITE_MODULE_URL="N/A"
+        NOMOUNT_SUITE_MODULE_SHA256="N/A"
+        if [ "$NOMOUNT_ENABLED" = "true" ] && [ "$ROOT_FLAVOR" = "bakasu" ] && [ -n "${{ inputs.nomount_suite_commit }}" ]; then
+          NOMOUNT_SUITE_ENABLED="true"
+          NOMOUNT_SUITE_VERSION="${{ inputs.nomount_suite_version }}"
+          NOMOUNT_SUITE_COMMIT="${{ inputs.nomount_suite_commit }}"
+        fi
+
         if [ "$NOMOUNT_ENABLED" = "true" ]; then
-          METHOD="GKI source build with SHA-pinned root implementation, SUSFS, and NoMount"
-          NOMOUNT_MODULE_COMMIT="${{ inputs.nomount_commit }}"
+          if [ "$NOMOUNT_SUITE_ENABLED" = "true" ]; then
+            METHOD="GKI source build with BakaSU, SUSFS, and NoMount Suite"
+            NOMOUNT_MODULE_COMMIT="N/A"
+          else
+            METHOD="GKI source build with SHA-pinned root implementation, SUSFS, and NoMount"
+            NOMOUNT_MODULE_COMMIT="${{ inputs.nomount_commit }}"
+          fi
         else
           METHOD="GKI source build with SHA-pinned root implementation and SUSFS"
           NOMOUNT_MODULE_COMMIT="N/A"
@@ -111,7 +137,13 @@ runs:
         read -r kernel_artifact_url kernel_artifact_sha256 < <(
           resolve_artifact "${{ inputs.file_name }}-AnyKernel3"
         )
-        if [ "$NOMOUNT_ENABLED" = "true" ]; then
+        if [ "$NOMOUNT_SUITE_ENABLED" = "true" ]; then
+          read -r NOMOUNT_SUITE_MODULE_URL NOMOUNT_SUITE_MODULE_SHA256 < <(
+            resolve_artifact "NoMount-Suite-Module-${NOMOUNT_SUITE_VERSION}"
+          )
+          nomount_module_url="N/A"
+          nomount_module_sha256="N/A"
+        elif [ "$NOMOUNT_ENABLED" = "true" ]; then
           read -r nomount_module_url nomount_module_sha256 < <(
             resolve_artifact "NoMount-Metamodule"
           )
@@ -139,6 +171,10 @@ runs:
           --arg nomount_module_commit "$NOMOUNT_MODULE_COMMIT" \
           --arg nomount_module_url "$nomount_module_url" \
           --arg nomount_module_sha256 "$nomount_module_sha256" \
+          --arg nomount_suite_version "$NOMOUNT_SUITE_VERSION" \
+          --arg nomount_suite_commit "$NOMOUNT_SUITE_COMMIT" \
+          --arg nomount_suite_module_url "$NOMOUNT_SUITE_MODULE_URL" \
+          --arg nomount_suite_module_sha256 "$NOMOUNT_SUITE_MODULE_SHA256" \
           --arg status "Build-verified only" \
           --arg catalog_availability "eligible-with-provenance-and-checksums" \
           --arg device_compatibility "not-validated" \
@@ -167,6 +203,12 @@ runs:
               artifact_url: $nomount_module_url,
               sha256: $nomount_module_sha256
             },
+            nomount_suite: {
+              version: $nomount_suite_version,
+              engine_commit: $nomount_suite_commit,
+              module_artifact_url: $nomount_suite_module_url,
+              module_artifact_sha256: $nomount_suite_module_sha256
+            },
             catalog: {
               availability: $catalog_availability,
               device_compatibility: $device_compatibility,
@@ -189,19 +231,38 @@ runs:
           .catalog.flashability == "not-guaranteed" and
           .catalog.boot == "not-guaranteed"
         ' "$metadata_file" > /dev/null || { echo "ERROR: build metadata validation failed (see $metadata_file)" >&2; exit 1; }
-        if [ "$NOMOUNT_ENABLED" = "true" ]; then
+        if [ "$NOMOUNT_SUITE_ENABLED" = "true" ]; then
+          jq -e '
+            (.nomount_commit | test("^[0-9a-f]{40}$")) and
+            (.nomount_metamodule.commit == "N/A") and
+            (.nomount_metamodule.artifact_url == "N/A") and
+            (.nomount_metamodule.sha256 == "N/A") and
+            (.nomount_suite.version | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+            (.nomount_suite.engine_commit == .nomount_commit) and
+            (.nomount_suite.module_artifact_url | startswith("https://")) and
+            (.nomount_suite.module_artifact_sha256 | test("^sha256:[0-9a-f]{64}$"))
+          ' "$metadata_file" > /dev/null || { echo "ERROR: NoMount Suite build metadata validation failed (see $metadata_file)" >&2; exit 1; }
+        elif [ "$NOMOUNT_ENABLED" = "true" ]; then
           jq -e '
             (.nomount_commit | test("^[0-9a-f]{40}$")) and
             (.nomount_metamodule.commit == .nomount_commit) and
             (.nomount_metamodule.artifact_url | startswith("https://")) and
-            (.nomount_metamodule.sha256 | test("^sha256:[0-9a-f]{64}$"))
+            (.nomount_metamodule.sha256 | test("^sha256:[0-9a-f]{64}$")) and
+            (.nomount_suite.version == "N/A") and
+            (.nomount_suite.engine_commit == "N/A") and
+            (.nomount_suite.module_artifact_url == "N/A") and
+            (.nomount_suite.module_artifact_sha256 == "N/A")
           ' "$metadata_file" > /dev/null || { echo "ERROR: build metadata validation failed (see $metadata_file)" >&2; exit 1; }
         else
           jq -e '
             (.nomount_commit == "N/A") and
             (.nomount_metamodule.commit == "N/A") and
             (.nomount_metamodule.artifact_url == "N/A") and
-            (.nomount_metamodule.sha256 == "N/A")
+            (.nomount_metamodule.sha256 == "N/A") and
+            (.nomount_suite.version == "N/A") and
+            (.nomount_suite.engine_commit == "N/A") and
+            (.nomount_suite.module_artifact_url == "N/A") and
+            (.nomount_suite.module_artifact_sha256 == "N/A")
           ' "$metadata_file" > /dev/null || { echo "ERROR: build metadata validation failed (see $metadata_file)" >&2; exit 1; }
         fi
 

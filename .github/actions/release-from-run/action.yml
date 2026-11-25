@@ -150,7 +150,7 @@ runs:
         done
         rm -f /tmp/apk.zip
 
-    - name: Download NoMount metamodule from source run
+    - name: Download NoMount module artifacts from source run
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -168,10 +168,10 @@ runs:
           count=$(grep -c . <<<"$batch" || true)
           [ "$count" -lt 100 ] && break
         done
-        mapfile -t nm < <(grep -iE 'nomount.*metamodule' "$names" | sort -u || true)
+        mapfile -t nm < <(grep -iE 'nomount.*(metamodule|suite-module)' "$names" | sort -u || true)
         rm -f "$names"
 
-        echo "Found ${#nm[@]} NoMount metamodule artifacts"
+        echo "Found ${#nm[@]} NoMount module artifacts"
         for name in "${nm[@]}"; do
           dest="release-assets/${name}"
           [[ -d "$dest" ]] && continue

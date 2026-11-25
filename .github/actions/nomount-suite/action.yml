@@ -1,0 +1,75 @@
+name: 'Integrate pinned NoMount Suite stack'
+description: 'Build the in-kernel NoMount Suite stack for BakaSU before SUSFS'
+
+runs:
+  using: composite
+  steps:
+    - name: Apply the pinned NoMount Suite stack without patch fuzz
+      shell: bash
+      env:
+        COMMON_KERNEL_FOLDER: ${{ github.workspace }}/kernel/common
+        KSU_FOLDER: ${{ github.workspace }}/kernel/BakaSU
+        BOUTEILLE_KERNEL_PATCHES_FOLDER: ${{ github.workspace }}/bouteille-kernel-patches
+      run: |
+        set -euo pipefail
+        source "${{ github.workspace }}/.github/config/nomount-suite.lock"
+
+        [[ "$NOMOUNT_SUITE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid NoMount Suite commit pin" >&2; exit 2; }
+        [[ "$BOUTEILLE_KERNEL_PATCHES_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid kernel_patches commit pin" >&2; exit 2; }
+        test -d "$COMMON_KERNEL_FOLDER/fs" || { echo "GKI common kernel tree is missing" >&2; exit 1; }
+        test -d "$KSU_FOLDER/kernel" || { echo "Pinned BakaSU checkout is missing" >&2; exit 1; }
+        test -f "$COMMON_KERNEL_FOLDER/wild_defconfig.fragment" || { echo "wild_defconfig.fragment is missing" >&2; exit 1; }
+        test ! -e "$BOUTEILLE_KERNEL_PATCHES_FOLDER" || { echo "Refusing to reuse an existing kernel_patches checkout" >&2; exit 1; }
+
+        git init -q "$BOUTEILLE_KERNEL_PATCHES_FOLDER"
+        git -C "$BOUTEILLE_KERNEL_PATCHES_FOLDER" remote add origin https://github.com/Bouteillepleine/kernel_patches.git
+        git -C "$BOUTEILLE_KERNEL_PATCHES_FOLDER" fetch --depth=1 origin "$BOUTEILLE_KERNEL_PATCHES_COMMIT"
+        git -C "$BOUTEILLE_KERNEL_PATCHES_FOLDER" checkout --detach --quiet FETCH_HEAD
+        actual_patches_commit="$(git -C "$BOUTEILLE_KERNEL_PATCHES_FOLDER" rev-parse HEAD)"
+        [ "$actual_patches_commit" = "$BOUTEILLE_KERNEL_PATCHES_COMMIT" ] || { echo "kernel_patches pin mismatch" >&2; exit 1; }
+
+        script="$BOUTEILLE_KERNEL_PATCHES_FOLDER/scripts/apply_nomount_stack.sh"
+        test -f "$script" || { echo "Pinned NoMount Suite integration script is missing" >&2; exit 1; }
+        integration_patch="${RUNNER_TEMP}/nomount-suite-${NOMOUNT_SUITE_COMMIT}.patch"
+        curl --fail --location --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors \
+          "https://raw.githubusercontent.com/Bouteillepleine/NoMount-Suite/${NOMOUNT_SUITE_COMMIT}/hookless/patches/nomount_kernel_integration.patch" \
+          --output "$integration_patch"
+        test -s "$integration_patch"
+
+        # Apply the overlapping task_mmu hunk before SUSFS, with fuzz disabled.
+        # The upstream stack script then sees the reverse dry-run and will not
+        # enter its optional fuzz-1 fallback path.
+        if patch -p1 -F0 --forward --dry-run -d "$COMMON_KERNEL_FOLDER" < "$integration_patch" >/dev/null 2>&1; then
+          patch -p1 -F0 --forward -d "$COMMON_KERNEL_FOLDER" < "$integration_patch"
+        elif patch -p1 -F0 --reverse --dry-run -d "$COMMON_KERNEL_FOLDER" < "$integration_patch" >/dev/null 2>&1; then
+          echo "NoMount Suite hookless patch is already applied"
+        else
+          echo "NoMount Suite hookless patch does not apply cleanly at fuzz 0; refusing to continue" >&2
+          exit 1
+        fi
+        patch -p1 -F0 --reverse --dry-run -d "$COMMON_KERNEL_FOLDER" < "$integration_patch" >/dev/null || {
+          echo "NoMount Suite hookless patch did not verify after the strict apply" >&2
+          exit 1
+        }
+
+        NOMOUNT_REF="$NOMOUNT_SUITE_REF" \
+        NOMOUNT_DEFCONFIG=../../../wild_defconfig.fragment \
+        GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+        GITHUB_ENV="$GITHUB_ENV" \
+        COMMON_KERNEL_FOLDER="$COMMON_KERNEL_FOLDER" \
+        KSU_FOLDER="$KSU_FOLDER" \
+        BOUTEILLE_KERNEL_PATCHES_FOLDER="$BOUTEILLE_KERNEL_PATCHES_FOLDER" \
+          bash "$script" all
+
+        actual_engine_commit="$(git -C "$GITHUB_WORKSPACE/nomount_hookless" rev-parse HEAD)"
+        [ "$actual_engine_commit" = "$NOMOUNT_SUITE_COMMIT" ] || {
+          echo "NoMount Suite engine pin mismatch: expected $NOMOUNT_SUITE_COMMIT, got $actual_engine_commit" >&2
+          exit 1
+        }
+        {
+          echo "BOUTEILLE_KERNEL_PATCHES_FOLDER=$BOUTEILLE_KERNEL_PATCHES_FOLDER"
+          echo "NOMOUNT_COMMIT=$NOMOUNT_SUITE_COMMIT"
+          echo "NOMOUNT_SUITE_COMMIT=$NOMOUNT_SUITE_COMMIT"
+          echo "NOMOUNT_SUITE_VERSION=$NOMOUNT_SUITE_REF"
+        } >> "$GITHUB_ENV"
+        echo "NoMount Suite integrated: engine=$actual_engine_commit patches=$actual_patches_commit"

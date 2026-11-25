@@ -270,6 +270,10 @@ jobs:
           python3 "${{ github.workspace }}/.github/scripts/append_fragment.py" \
             "${{ github.workspace }}/.github/fragments/single-manager-for-finasu-dynamic-manager-off.fragment" \
             --dest wild_defconfig.fragment --label single-manager-for-finasu-dynamic-manager-off
+      - name: Integrate NoMount Suite for BakaSU (pre-SUSFS)
+        if: (contains(inputs.feature_set, 'NoMount') || inputs.feature_set == 'All') && inputs.root_flavor == 'bakasu' && contains(fromJSON('["5.10","5.15","6.1","6.6","6.12"]'), inputs.kernel_version)
+        uses: ./.github/actions/nomount-suite
+
       - name: SUSFS
         # One step, one action: resolve the SUSFS commit, apply it for the
         # selected root, then run the post-patch fixes (ksu_close_fd restore,
@@ -286,6 +290,21 @@ jobs:
           os_patch_level: ${{ inputs.os_patch_level }}
           sublevel: ${{ steps.extract.outputs.sublevel }}
           root_flavor: ${{ inputs.root_flavor }}
+
+      - name: Apply NoMount Suite corrections after SUSFS
+        if: (contains(inputs.feature_set, 'NoMount') || inputs.feature_set == 'All') && inputs.root_flavor == 'bakasu' && contains(fromJSON('["5.10","5.15","6.1","6.6","6.12"]'), inputs.kernel_version)
+        shell: bash
+        env:
+          COMMON_KERNEL_FOLDER: ${{ github.workspace }}/kernel/common
+          KSU_FOLDER: ${{ github.workspace }}/kernel/BakaSU
+          NOMOUNT_DEFCONFIG: ../../../wild_defconfig.fragment
+        run: |
+          set -euo pipefail
+          script="$BOUTEILLE_KERNEL_PATCHES_FOLDER/scripts/apply_nomount_stack.sh"
+          test -f "$script"
+          bash "$script" seqno
+          bash "$script" postsusfs
+          bash "$script" verify hookless hook pathhide ghost
 
       - name: Baseband Guard
         if: (contains(inputs.feature_set, 'BBG') || inputs.feature_set == 'All')
@@ -403,7 +422,7 @@ jobs:
           version: ${{ inputs.version }}
 
       - name: Integrate NoMount
-        if: contains(inputs.feature_set, 'NoMount') || inputs.feature_set == 'All'
+        if: (contains(inputs.feature_set, 'NoMount') || inputs.feature_set == 'All') && (inputs.root_flavor != 'bakasu' || !contains(fromJSON('["5.10","5.15","6.1","6.6","6.12"]'), inputs.kernel_version))
         uses: ./.github/actions/nomount
         with:
           commit: ${{ inputs.nomount_commit }}
@@ -458,6 +477,30 @@ jobs:
           version: ${{ inputs.version }}
           page_size: ${{ inputs.page_size }}
 
+      - name: Assert NoMount Suite configuration after defconfig
+        if: inputs.root_flavor == 'bakasu' && env.NOMOUNT_SUITE_COMMIT != ''
+        shell: bash
+        working-directory: ${{ github.workspace }}/kernel
+        run: |
+          set -euo pipefail
+          CONFIG_FILE=""
+          for candidate in \
+            bazel-bin/common/kernel_aarch64_config/out_dir/.config \
+            /home/runner/out/.config; do
+            if [ -f "$candidate" ]; then CONFIG_FILE="$candidate"; break; fi
+          done
+          if [ -z "$CONFIG_FILE" ]; then
+            CONFIG_FILE="$(find bazel-bin/common /home/runner/out -maxdepth 4 -name .config -type f 2>/dev/null | head -n1 || true)"
+          fi
+          if [ -z "$CONFIG_FILE" ]; then
+            echo "NoMount Suite config check could not locate the generated .config." >&2
+            exit 1
+          fi
+          echo "Checking NoMount Suite config in $CONFIG_FILE"
+          KERNEL_CONFIG_FILE="$CONFIG_FILE" \
+            COMMON_KERNEL_FOLDER="${{ github.workspace }}/kernel/common" \
+            bash "$BOUTEILLE_KERNEL_PATCHES_FOLDER/scripts/apply_nomount_stack.sh" assert-config
+
       - name: ABI gate
         # Compares Module.symvers CRCs against the stock ABI of the tree that was
         # built and fails on any symbol whose CRC moved.
@@ -486,7 +529,7 @@ jobs:
           variant: ${{ inputs.variant }}
           page_size: ${{ inputs.page_size }}
           feature_set: ${{ inputs.feature_set }}
-          nomount_commit: ${{ inputs.nomount_commit }}
+          nomount_commit: ${{ env.NOMOUNT_COMMIT }}
           susfs_commit: ${{ inputs.susfs_commit }}
 
       - name: Upload Artifacts
@@ -505,7 +548,10 @@ jobs:
           summary_base: ${{ steps.build-summary.outputs.summary_base }}
           file_name: ${{ steps.extract.outputs.file_name }}
           feature_set: ${{ inputs.feature_set }}
-          nomount_commit: ${{ inputs.nomount_commit }}
+          nomount_commit: ${{ env.NOMOUNT_COMMIT }}
+          root_flavor: ${{ inputs.root_flavor }}
+          nomount_suite_commit: ${{ env.NOMOUNT_SUITE_COMMIT }}
+          nomount_suite_version: ${{ env.NOMOUNT_SUITE_VERSION }}
           android_version: ${{ inputs.android_version }}
           kernel_version: ${{ inputs.kernel_version }}
           os_patch_level: ${{ inputs.os_patch_level }}

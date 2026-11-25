@@ -1,0 +1,6 @@
+# Audited NoMount Suite and patch-stack revisions. Update the engine and module together.
+NOMOUNT_SUITE_REF=v1.3.217
+NOMOUNT_SUITE_COMMIT=66f4452ae4fdde2df162af32c38bdb1bd8ebfafd
+BOUTEILLE_KERNEL_PATCHES_COMMIT=efc078ab29fa342888c78029f17ad6d01f869252
+NOMOUNT_SUITE_MODULE=00_NoMount-Module-v1.3.217.zip
+NOMOUNT_SUITE_MODULE_SHA256=28deb3f465e2b0662e704dfd3c2588b1ff724cc318b2fac3e806aa08b1d1e03d

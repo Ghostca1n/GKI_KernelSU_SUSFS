@@ -91,6 +91,8 @@ runs:
         else
           NOMOUNT_SHA="N/A"
         fi
+        NOMOUNT_SUITE_VER="${NOMOUNT_SUITE_VERSION:-N/A}"
+        NOMOUNT_SUITE_SHA="${NOMOUNT_SUITE_COMMIT:-N/A}"
         SUSFS_SHA="${SUSFS_COMMIT:-${{ inputs.susfs_commit }}}"
 
         # Get SUSFS version from susfs.h if available
@@ -118,6 +120,10 @@ runs:
           echo "| **SUSFS Version** | ${SUSFS_VER} |"
           echo "| **SUSFS Commit** | ${SUSFS_SHA} |"
           echo "| **NoMount Commit** | ${NOMOUNT_SHA} |"
+          if [ "$NOMOUNT_SUITE_SHA" != "N/A" ]; then
+            echo "| **NoMount Suite Version** | ${NOMOUNT_SUITE_VER} |"
+            echo "| **NoMount Suite Engine Commit** | ${NOMOUNT_SUITE_SHA} |"
+          fi
           echo "| **Feature Set** | ${{ inputs.feature_set }} |"
           echo "| **Variant** | ${{ inputs.variant }} |"
           echo "| **Page Size** | ${{ inputs.page_size }} |"
