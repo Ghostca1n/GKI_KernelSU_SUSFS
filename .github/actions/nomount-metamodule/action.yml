@@ -18,10 +18,11 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Set up Zig
-      uses: jetsung/setup-zig@v0.0.4
+    - name: Set up cached Zig
+      uses: step-security/setup-zig@1e9fbd457bcc3587b58845344a267f12f151709c
       with:
         version: master
+        use-cache: true
 
     - name: Build and package matching metamodule
       id: package
